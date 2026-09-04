@@ -4,7 +4,9 @@
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 const WHISPER_MODEL = 'whisper-large-v3-turbo';
-const LLM_MODEL = 'llama-3.3-70b-versatile';
+// Tried in order; Groq retires model names now and then, so keep a spare.
+const LLM_MODELS = ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
+const LLM_MODEL = LLM_MODELS[0];
 
 const LANG_NAMES = { ko: 'Korean', en: 'English' };
 
@@ -55,24 +57,30 @@ async function translate(text, from, to, env) {
     'Return ONLY a JSON object with two keys: "cleaned" (the tidied source text) and "translation". No commentary.',
   ].join(' ');
 
-  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: text },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
-  const data = await res.json();
+  let data = null;
+  let lastErr = '';
+  for (const model of LLM_MODELS) {
+    const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: text },
+        ],
+      }),
+    });
+    if (res.ok) { data = await res.json(); break; }
+    lastErr = `LLM ${model} ${res.status}: ${await res.text()}`;
+    console.warn(lastErr);
+  }
+  if (!data) throw new Error(lastErr || 'All LLM models failed');
   const content = data.choices?.[0]?.message?.content || '{}';
   let parsed;
   try {
@@ -92,6 +100,15 @@ export default {
     const cors = corsHeaders(origin, env);
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+    // Diagnostic: list the models this key can use (helps when Groq retires a model name).
+    if (request.method === 'GET' && new URL(request.url).pathname === '/models') {
+      const r = await fetch(`${GROQ_BASE}/models`, { headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` } });
+      const d = await r.json().catch(() => ({}));
+      const ids = (d.data || []).map((m) => m.id).sort();
+      return json({ models: ids, using: { whisper: WHISPER_MODEL, llm: LLM_MODEL } }, r.ok ? 200 : 502, cors);
+    }
+
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405, cors);
     if (!env.GROQ_API_KEY) return json({ error: 'Server is missing GROQ_API_KEY' }, 500, cors);
 
