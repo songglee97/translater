@@ -181,46 +181,83 @@ if (!SpeechRecognitionCtor) {
   recognition.continuous = true; // keep recording until the button is tapped again
   recognition.maxAlternatives = 1;
 
-  let gotSpeech = false; // did this recording produce any transcript?
+  // The browser ends a recognition session on its own after a pause in speech.
+  // To make recording stop ONLY on the second tap, we auto-restart the session
+  // whenever it ends without the user asking, and carry the transcript across sessions.
+  let userStopped = true;   // false while the user wants recording to continue
+  let committed = '';       // finalized text from earlier sessions
+  let sessionFinal = '';    // finalized text from the current session
+  let fatal = false;        // an error that makes restarting pointless (mic denied, etc.)
+
+  function showTranscript(interim = '') {
+    const text = [committed, sessionFinal, interim].filter(Boolean).join(' ').trim();
+    els.sourceText.value = text.slice(0, 500);
+    updateCounter();
+  }
+
+  function setRecordingUI(on) {
+    listening = on;
+    els.micBtn.classList.toggle('listening', on);
+    els.micHint.textContent = on
+      ? (sourceLang === 'ko' ? '녹음 중… 다시 누르면 멈추고 번역돼요' : 'Recording… tap again to stop and translate')
+      : 'Tap the mic to start recording';
+  }
+
+  function startSession() {
+    sessionFinal = '';
+    recognition.lang = LANGS[sourceLang].speech;
+    try {
+      recognition.start();
+    } catch (e) {
+      // start() throws if a session is already running; ignore.
+      console.warn(e);
+    }
+  }
 
   recognition.onstart = () => {
-    listening = true;
-    gotSpeech = false;
-    els.micBtn.classList.add('listening');
-    els.micHint.textContent = sourceLang === 'ko' ? '녹음 중… 다시 누르면 번역돼요' : 'Recording… tap again to translate';
+    setRecordingUI(true);
     setStatus('');
   };
 
   recognition.onresult = (event) => {
-    let text = '';
-    for (const r of event.results) text += r[0].transcript + ' ';
-    text = text.trim();
-    if (text) {
-      gotSpeech = true;
-      els.sourceText.value = text.slice(0, 500);
-      updateCounter();
+    let finalText = '';
+    let interim = '';
+    for (const r of event.results) {
+      if (r.isFinal) finalText += r[0].transcript + ' ';
+      else interim += r[0].transcript + ' ';
     }
+    sessionFinal = finalText.trim();
+    showTranscript(interim.trim());
   };
 
   recognition.onerror = (event) => {
     const messages = {
       'not-allowed': 'Microphone access was blocked. Allow the mic in your browser settings and try again.',
       'service-not-allowed': 'Speech service not allowed in this browser.',
-      'no-speech': 'No speech detected. Tap the mic and try again.',
       'audio-capture': 'No microphone found.',
       'network': 'Speech recognition needs an internet connection.',
-      'aborted': '',
     };
-    const msg = messages[event.error] ?? `Speech error: ${event.error}`;
-    if (msg) setStatus(msg, true);
+    if (event.error in messages) {
+      fatal = true;
+      setStatus(messages[event.error], true);
+    }
+    // 'no-speech' and 'aborted' are normal during a long recording; onend will restart.
   };
 
   recognition.onend = () => {
-    listening = false;
-    els.micBtn.classList.remove('listening');
-    els.micHint.textContent = 'Tap the mic to start recording';
-    // Recording finished: translate everything that was said.
-    if (gotSpeech) {
+    // Fold this session's final text into the running transcript.
+    committed = [committed, sessionFinal].filter(Boolean).join(' ').trim();
+    sessionFinal = '';
+
+    if (!userStopped && !fatal) {
+      // Browser ended the session on its own: keep recording.
+      startSession();
+      return;
+    }
+
+    setRecordingUI(false);
+    showTranscript();
+    if (committed) {
       clearTimeout(typingTimer);
       doTranslate({ speakAfter: true });
     }
@@ -228,20 +265,19 @@ if (!SpeechRecognitionCtor) {
 
   els.micBtn.addEventListener('click', () => {
     if (listening) {
+      userStopped = true;
       recognition.stop(); // onend fires next and triggers the translation
       return;
     }
     speechSynthesis?.cancel();
+    userStopped = false;
+    fatal = false;
+    committed = '';
+    sessionFinal = '';
     els.sourceText.value = '';
     els.targetText.value = '';
     updateCounter();
-    recognition.lang = LANGS[sourceLang].speech;
-    try {
-      recognition.start();
-    } catch (e) {
-      // start() throws if called while already running
-      console.warn(e);
-    }
+    startSession();
   });
 }
 
