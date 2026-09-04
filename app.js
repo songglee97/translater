@@ -178,28 +178,27 @@ if (!SpeechRecognitionCtor) {
 } else {
   recognition = new SpeechRecognitionCtor();
   recognition.interimResults = true;
-  recognition.continuous = false;
+  recognition.continuous = true; // keep recording until the button is tapped again
   recognition.maxAlternatives = 1;
+
+  let gotSpeech = false; // did this recording produce any transcript?
 
   recognition.onstart = () => {
     listening = true;
+    gotSpeech = false;
     els.micBtn.classList.add('listening');
-    els.micHint.textContent = sourceLang === 'ko' ? '듣고 있어요… 말하세요' : 'Listening… speak now';
+    els.micHint.textContent = sourceLang === 'ko' ? '녹음 중… 다시 누르면 번역돼요' : 'Recording… tap again to translate';
     setStatus('');
   };
 
   recognition.onresult = (event) => {
-    let interim = '';
-    let finalText = '';
-    for (const r of event.results) {
-      if (r.isFinal) finalText += r[0].transcript;
-      else interim += r[0].transcript;
-    }
-    els.sourceText.value = finalText || interim;
-    updateCounter();
-    if (finalText) {
-      clearTimeout(typingTimer);
-      doTranslate({ speakAfter: true });
+    let text = '';
+    for (const r of event.results) text += r[0].transcript + ' ';
+    text = text.trim();
+    if (text) {
+      gotSpeech = true;
+      els.sourceText.value = text.slice(0, 500);
+      updateCounter();
     }
   };
 
@@ -219,15 +218,23 @@ if (!SpeechRecognitionCtor) {
   recognition.onend = () => {
     listening = false;
     els.micBtn.classList.remove('listening');
-    els.micHint.textContent = 'Tap the mic and speak';
+    els.micHint.textContent = 'Tap the mic to start recording';
+    // Recording finished: translate everything that was said.
+    if (gotSpeech) {
+      clearTimeout(typingTimer);
+      doTranslate({ speakAfter: true });
+    }
   };
 
   els.micBtn.addEventListener('click', () => {
     if (listening) {
-      recognition.stop();
+      recognition.stop(); // onend fires next and triggers the translation
       return;
     }
     speechSynthesis?.cancel();
+    els.sourceText.value = '';
+    els.targetText.value = '';
+    updateCounter();
     recognition.lang = LANGS[sourceLang].speech;
     try {
       recognition.start();

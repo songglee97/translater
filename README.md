@@ -1,6 +1,6 @@
 # Voice Translator (한국어 ↔ English)
 
-A tiny web app: tap the mic, speak Korean or English, and hear the translation spoken back. Pure HTML/CSS/JavaScript, no server, no API key.
+A tiny web app: tap the mic to start recording, speak Korean or English for as long as you like, tap again to stop, and hear the translation spoken back. Pure HTML/CSS/JavaScript, no server, no API key.
 
 ## How it works
 - **Speech-to-text / text-to-speech:** the browser's built-in Web Speech API (Chrome, Edge, Safari; Firefox can only type).
