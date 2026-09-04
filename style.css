@@ -36,6 +36,9 @@ body {
   max-width: 900px;
   margin: 0 auto;
   padding: 24px 16px 48px;
+  /* keep content clear of the iPhone notch / home bar when opened from the home screen */
+  padding-top: calc(24px + env(safe-area-inset-top));
+  padding-bottom: calc(48px + env(safe-area-inset-bottom));
 }
 
 header { text-align: center; margin-bottom: 16px; }
