@@ -1,6 +1,14 @@
 // Voice Translator — Korean <-> English
-// Speech-to-text and text-to-speech use the browser's Web Speech API (no key).
-// Translation uses the free MyMemory API, with an unofficial Google endpoint as fallback.
+//
+// Two modes, chosen by window.TRANSLATER_API_URL (see config.js):
+//  - API mode (recommended): record audio with MediaRecorder while the mic is on,
+//    send it to our Cloudflare Worker, which runs Whisper + an LLM on Groq.
+//    Handles mid-sentence pauses naturally because the whole recording is heard at once.
+//  - Browser mode (fallback): Web Speech API for recognition + MyMemory for translation.
+// Text-to-speech always uses the browser's speechSynthesis.
+
+const API_URL = (window.TRANSLATER_API_URL || '').trim();
+const API_MODE = API_URL.length > 0 && typeof MediaRecorder !== 'undefined' && navigator.mediaDevices?.getUserMedia;
 
 const LANGS = {
   ko: { code: 'ko', speech: 'ko-KR', label: '한국어' },
@@ -34,7 +42,8 @@ function setStatus(msg, isError = false) {
 }
 
 function updateCounter() {
-  els.counter.textContent = `${els.sourceText.value.length} / 500`;
+  const n = els.sourceText.value.length;
+  els.counter.textContent = API_URL ? `${n} chars` : `${n} / 500`;
 }
 
 function updateLabels() {
@@ -67,7 +76,28 @@ async function translateViaGoogleGtx(text, from, to) {
   return out;
 }
 
+// Our own Worker: accepts either { text } or { audio } plus from/to, returns { transcript, translation }.
+async function callApi({ text, audio, from, to }) {
+  const form = new FormData();
+  form.append('from', from);
+  form.append('to', to);
+  if (audio) form.append('audio', audio, audio.name || 'audio');
+  if (text) form.append('text', text);
+  const res = await fetch(API_URL, { method: 'POST', body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `API HTTP ${res.status}`);
+  return data;
+}
+
 async function translate(text, from, to) {
+  if (API_URL) {
+    try {
+      const data = await callApi({ text, from, to });
+      return data.translation;
+    } catch (e0) {
+      console.warn('Worker failed, falling back to MyMemory:', e0);
+    }
+  }
   try {
     return await translateViaMyMemory(text, from, to);
   } catch (e1) {
@@ -83,7 +113,7 @@ async function doTranslate({ speakAfter = false } = {}) {
     els.targetText.value = '';
     return;
   }
-  if (text.length > 500) {
+  if (!API_URL && text.length > 500) {
     setStatus('Please keep it under 500 characters.', true);
     return;
   }
@@ -172,7 +202,109 @@ const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRec
 let recognition = null;
 let listening = false;
 
-if (!SpeechRecognitionCtor) {
+// ===== API mode: record audio, send the whole clip to the Worker =====
+if (API_MODE) {
+  let mediaRecorder = null;
+  let chunks = [];
+  let stream = null;
+  let timerId = null;
+  let startedAt = 0;
+
+  function pickMimeType() {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    return candidates.find((t) => MediaRecorder.isTypeSupported(t)) || '';
+  }
+
+  function fmtElapsed() {
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function setRecordingUI(on) {
+    listening = on;
+    els.micBtn.classList.toggle('listening', on);
+    if (on) {
+      const tick = () => {
+        els.micHint.textContent = (sourceLang === 'ko'
+          ? `녹음 중 ${fmtElapsed()} · 다시 누르면 번역돼요`
+          : `Recording ${fmtElapsed()} · tap again to translate`);
+      };
+      tick();
+      timerId = setInterval(tick, 500);
+    } else {
+      clearInterval(timerId);
+      els.micHint.textContent = 'Tap the mic to start recording';
+    }
+  }
+
+  async function startRecording() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      console.error(e);
+      setStatus('Microphone access was blocked. Allow the mic in your browser settings and try again.', true);
+      return;
+    }
+    chunks = [];
+    const mimeType = pickMimeType();
+    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    mediaRecorder.onstop = onRecordingStopped;
+    mediaRecorder.start(250); // gather data every 250ms so nothing is lost on stop
+    startedAt = Date.now();
+    setRecordingUI(true);
+    setStatus('');
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    setRecordingUI(false);
+  }
+
+  async function onRecordingStopped() {
+    stream?.getTracks().forEach((t) => t.stop());
+    const type = mediaRecorder.mimeType || chunks[0]?.type || 'audio/webm';
+    const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+    const blob = new Blob(chunks, { type });
+    chunks = [];
+    if (blob.size < 1000 || Date.now() - startedAt < 500) {
+      setStatus('Recording was too short. Tap the mic and speak.', true);
+      return;
+    }
+    const file = new File([blob], `speech.${ext}`, { type });
+
+    translating = true;
+    els.translateBtn.disabled = true;
+    els.micBtn.disabled = true;
+    setStatus(sourceLang === 'ko' ? '음성을 인식하고 번역하는 중…' : 'Transcribing and translating…');
+    try {
+      const data = await callApi({ audio: file, from: sourceLang, to: targetLang });
+      els.sourceText.value = (data.transcript || '').slice(0, 2000);
+      els.targetText.value = data.translation || '';
+      updateCounter();
+      setStatus('');
+      if (els.autoSpeak.checked) speak(data.translation, targetLang);
+    } catch (err) {
+      console.error(err);
+      setStatus(`Failed: ${err.message}`, true);
+    } finally {
+      translating = false;
+      els.translateBtn.disabled = false;
+      els.micBtn.disabled = false;
+    }
+  }
+
+  els.micBtn.addEventListener('click', () => {
+    if (listening) { stopRecording(); return; }
+    speechSynthesis?.cancel();
+    els.sourceText.value = '';
+    els.targetText.value = '';
+    updateCounter();
+    startRecording();
+  });
+
+// ===== Browser mode: Web Speech API =====
+} else if (!SpeechRecognitionCtor) {
   els.micBtn.disabled = true;
   els.micHint.textContent = 'Voice input needs Chrome, Edge, or Safari. You can still type.';
 } else {

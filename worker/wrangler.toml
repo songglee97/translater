@@ -1,0 +1,10 @@
+name = "translater-api"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Comma-separated list of sites allowed to call this API. Empty = allow all.
+ALLOWED_ORIGINS = "https://songglee97.github.io,http://localhost:8000"
+
+# The Groq key is a secret, NOT a var. Set it with:
+#   npx wrangler secret put GROQ_API_KEY

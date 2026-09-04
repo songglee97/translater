@@ -1,0 +1,11 @@
+{
+  "name": "translater-api",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "secret": "wrangler secret put GROQ_API_KEY"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.0"
+  }
+}
