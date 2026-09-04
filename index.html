@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Translator · 한↔영</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>🎤 Voice Translator</h1>
+      <p class="sub">Speak Korean or English, get the translation spoken back.</p>
+    </header>
+
+    <section class="lang-bar">
+      <span id="srcLabel" class="lang">한국어</span>
+      <button id="swapBtn" class="icon-btn" title="Swap languages">⇄</button>
+      <span id="tgtLabel" class="lang">English</span>
+    </section>
+
+    <section class="mic-area">
+      <button id="micBtn" class="mic" title="Tap and speak">
+        <span class="mic-icon">🎤</span>
+      </button>
+      <p id="micHint" class="hint">Tap the mic and speak</p>
+    </section>
+
+    <section class="panes">
+      <div class="pane">
+        <label for="sourceText">Source</label>
+        <textarea id="sourceText" placeholder="Speak or type here…" maxlength="500"></textarea>
+        <div class="row">
+          <span id="counter" class="counter">0 / 500</span>
+          <button id="translateBtn" class="btn primary">Translate</button>
+        </div>
+      </div>
+
+      <div class="pane">
+        <label for="targetText">Translation</label>
+        <textarea id="targetText" readonly placeholder="Translation appears here…"></textarea>
+        <div class="row">
+          <label class="toggle"><input type="checkbox" id="autoSpeak" checked> Auto-speak</label>
+          <div class="btn-group">
+            <button id="speakBtn" class="btn" title="Speak translation">🔊 Speak</button>
+            <button id="copyBtn" class="btn" title="Copy translation">📋 Copy</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p id="status" class="status" role="status"></p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
