@@ -187,10 +187,11 @@ if (!SpeechRecognitionCtor) {
   let userStopped = true;   // false while the user wants recording to continue
   let committed = '';       // finalized text from earlier sessions
   let sessionFinal = '';    // finalized text from the current session
+  let sessionInterim = '';  // not-yet-finalized text from the current session (shown live)
   let fatal = false;        // an error that makes restarting pointless (mic denied, etc.)
 
-  function showTranscript(interim = '') {
-    const text = [committed, sessionFinal, interim].filter(Boolean).join(' ').trim();
+  function showTranscript() {
+    const text = [committed, sessionFinal, sessionInterim].filter(Boolean).join(' ').trim();
     els.sourceText.value = text.slice(0, 500);
     updateCounter();
   }
@@ -205,6 +206,7 @@ if (!SpeechRecognitionCtor) {
 
   function startSession() {
     sessionFinal = '';
+    sessionInterim = '';
     recognition.lang = LANGS[sourceLang].speech;
     try {
       recognition.start();
@@ -227,7 +229,8 @@ if (!SpeechRecognitionCtor) {
       else interim += r[0].transcript + ' ';
     }
     sessionFinal = finalText.trim();
-    showTranscript(interim.trim());
+    sessionInterim = interim.trim();
+    showTranscript();
   };
 
   recognition.onerror = (event) => {
@@ -245,9 +248,12 @@ if (!SpeechRecognitionCtor) {
   };
 
   recognition.onend = () => {
-    // Fold this session's final text into the running transcript.
-    committed = [committed, sessionFinal].filter(Boolean).join(' ').trim();
+    // Fold this session's text into the running transcript. Include the interim
+    // (not-yet-finalized) part too: when the user taps stop, the browser often ends
+    // without ever marking the last phrase as final, and we must not lose it.
+    committed = [committed, sessionFinal, sessionInterim].filter(Boolean).join(' ').trim();
     sessionFinal = '';
+    sessionInterim = '';
 
     if (!userStopped && !fatal) {
       // Browser ended the session on its own: keep recording.
